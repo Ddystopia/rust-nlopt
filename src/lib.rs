@@ -288,7 +288,6 @@ impl<'a, F: ObjFn<T>, T> Nlopt<'a, F, T> {
         // parameters to the callback. For this we pack it inside a FunctionCfg struct.
         // We allocation our FunctionCfg on the heap and pass a pointer to the C lib
         // (This is pretty unsafe but works).
-        // `into_raw` will leak the boxed object
         let func_cfg = Box::new(FunctionCfg {
             objective_fn,
             user_data, // move user_data into FunctionCfg
