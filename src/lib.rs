@@ -219,9 +219,9 @@ type ConstraintCfg<F, T> = FunctionCfg<F, T>;
 /// `gradient` is `Some(x)`, the user is required to return a valid gradient, otherwise the
 /// optimization will most likely fail.
 /// * `user_data` - user defined data
-pub trait MObjFn<U>: Fn(&mut [f64], &[f64], Option<&mut [f64]>, &mut U) + 'static {}
+pub trait MObjFn<U>: Fn(&mut [f64], &[f64], Option<&mut [f64]>, &mut U) {}
 
-impl<T: 'static, U> MObjFn<U> for T where T: Fn(&mut [f64], &[f64], Option<&mut [f64]>, &mut U) {}
+impl<T, U> MObjFn<U> for T where T: Fn(&mut [f64], &[f64], Option<&mut [f64]>, &mut U) {}
 
 /// Packs an `m`-dimensional function of type `NLoptMFn<T>` with a user defined parameter set of type `T`.
 struct MConstraintCfg<F: MObjFn<T>, T> {
@@ -229,16 +229,16 @@ struct MConstraintCfg<F: MObjFn<T>, T> {
     user_data: T,
 }
 
-struct NloptOwner {
+struct NloptOwner<'a> {
     nloptc_obj: sys::nlopt_opt,
     // Run after
     // 1. nlopt_destroy
     // 2. nlopt_remove_equality_constraints
-    eq_constraint_clean_ups: Vec<Box<dyn FnOnce()>>,
+    eq_constraint_clean_ups: Vec<Box<dyn FnOnce() + 'a>>,
     // Run after
     // 1. nlopt_destroy
     // 2. nlopt_remove_inequality_constraints
-    ineq_constraint_clean_ups: Vec<Box<dyn FnOnce()>>,
+    ineq_constraint_clean_ups: Vec<Box<dyn FnOnce() + 'a>>,
 }
 
 /// This is the central ```struct``` of this library. It represents an optimization of a given
@@ -246,15 +246,15 @@ struct NloptOwner {
 /// `n`-dimensional double-precision vector. The dimensions are set at creation of the struct and
 /// cannot be changed afterwards. NLopt offers different optimization algorithms. One must be
 /// chosen at struct creation and cannot be changed afterwards. Always use ```Nlopt::<T>::new()``` to create an `Nlopt` struct.
-pub struct Nlopt<F: ObjFn<T>, T> {
+pub struct Nlopt<'a, F: ObjFn<T>, T> {
     algorithm: Algorithm,
     n_dims: usize,
     target: Target,
-    owner: NloptOwner,
+    owner: NloptOwner<'a>,
     func_cfg: Box<FunctionCfg<F, T>>,
 }
 
-impl<F: ObjFn<T>, T> Nlopt<F, T> {
+impl<'a, F: ObjFn<T>, T> Nlopt<'a, F, T> {
     fn nloptc_obj(&self) -> sys::nlopt_opt {
         self.owner.nloptc_obj
     }
@@ -278,7 +278,7 @@ impl<F: ObjFn<T>, T> Nlopt<F, T> {
         objective_fn: F,
         target: Target,
         user_data: T,
-    ) -> Nlopt<F, T> {
+    ) -> Self {
         // TODO this might be better off as a builder pattern
         let nloptc_obj = unsafe { sys::nlopt_create(algorithm as u32, n_dims as u32) };
 
@@ -426,7 +426,7 @@ impl<F: ObjFn<T>, T> Nlopt<F, T> {
     /// satisfied;
     /// generally, at least a small positive tolerance is advisable to reduce sensitivity to
     /// rounding errors.
-    pub fn add_equality_constraint<G: ObjFn<U>, U: 'static>(
+    pub fn add_equality_constraint<G: ObjFn<U> + 'a, U: 'a>(
         &mut self,
         constraint: G,
         user_data: U,
@@ -437,7 +437,7 @@ impl<F: ObjFn<T>, T> Nlopt<F, T> {
 
     /// Set a nonlinear constraint of the form `fc(x) ≤ 0`.
     /// For more information see the documentation for `add_equality_constraint`.
-    pub fn add_inequality_constraint<G: ObjFn<U>, U: 'static>(
+    pub fn add_inequality_constraint<G: ObjFn<U> + 'a, U: 'a>(
         &mut self,
         constraint: G,
         user_data: U,
@@ -446,7 +446,7 @@ impl<F: ObjFn<T>, T> Nlopt<F, T> {
         self.add_constraint(constraint, user_data, tolerance, false)
     }
 
-    fn add_constraint<G: ObjFn<U>, U: 'static>(
+    fn add_constraint<G: ObjFn<U> + 'a, U: 'a>(
         &mut self,
         constraint: G,
         user_data: U,
@@ -498,7 +498,7 @@ impl<F: ObjFn<T>, T> Nlopt<F, T> {
     ///
     /// * `constraint` - A constraint function bundled with user defined parameters.
     /// * `tolerance` - An array slice of length `m` of the tolerances in each constraint dimension
-    pub fn add_equality_mconstraint<G: MObjFn<U>, U: 'static>(
+    pub fn add_equality_mconstraint<G: MObjFn<U> + 'a, U: 'a>(
         &mut self,
         m: usize,
         constraint: G,
@@ -510,7 +510,7 @@ impl<F: ObjFn<T>, T> Nlopt<F, T> {
 
     /// Set a nonlinear multivalue inequality constraint.
     /// For more information see the documentation for `add_equality_mconstraint`.
-    pub fn add_inequality_mconstraint<G: MObjFn<U>, U: 'static>(
+    pub fn add_inequality_mconstraint<G: MObjFn<U> + 'a, U: 'a>(
         &mut self,
         m: usize,
         constraint: G,
@@ -520,7 +520,7 @@ impl<F: ObjFn<T>, T> Nlopt<F, T> {
         self.add_mconstraint(m, constraint, user_data, tolerance, false)
     }
 
-    fn add_mconstraint<G: MObjFn<U>, U: 'static>(
+    fn add_mconstraint<G: MObjFn<U> + 'a, U: 'a>(
         &mut self,
         m: usize,
         constraint: G,
@@ -893,7 +893,7 @@ impl<F: ObjFn<T>, T> Nlopt<F, T> {
     }
 }
 
-impl Drop for NloptOwner {
+impl Drop for NloptOwner<'_> {
     fn drop(&mut self) {
         unsafe {
             sys::nlopt_destroy(self.nloptc_obj);
